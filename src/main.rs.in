@@ -59,12 +59,17 @@ fn main() {
     let socket_path = "/tmp/vm.sock";
     let (command_tx, command_rx) = mpsc::channel();
     let (reply_tx, reply_rx) = mpsc::channel();
-    let (events_tx, events_rx) = mpsc::channel();
+    let (event_tx, event_rx) = mpsc::channel();
 
     // NOTE(SamYaple): Thread responsible for interacting with socket
     let monitor = thread::spawn(move || {
-        monitor(socket_path, command_rx, reply_tx, events_tx)
+        monitor(socket_path, command_rx, reply_tx, event_tx)
     });
+
+    // NOTE(SamYaple): temporary thread that exists to clear the reply channel
+    thread::spawn(move || {loop {reply_rx.recv().unwrap();}});
+    // NOTE(SamYaple): temporary thread that exists to clear the event channel
+    thread::spawn(move || {loop {event_rx.recv().unwrap();}});
 
     // NOTE(SamYaple): Thread responsible for periodic health checks
     thread::spawn(move || {
@@ -84,11 +89,11 @@ fn execute(writer: &mut UnixStream, command: String) {
     writer.write_all(command.as_bytes()).unwrap();
 }
 
-fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc::Sender<String>, events_tx: mpsc::Sender<String>) {
+fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc::Sender<String>, event_tx: mpsc::Sender<String>) {
     // TODO(SamYaple): Error checking
     // TODO(SamYaple): socket timeout
     let mut socket = UnixStream::connect(socket_path).unwrap();
-    let mut read_socket = socket.try_clone().unwrap();
+    let read_socket = socket.try_clone().unwrap();
     let mut reader = BufReader::new(read_socket);
 
     // NOTE(SamYaple): Read initial string from socket containing version and capability info
@@ -104,7 +109,13 @@ fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc
     // NOTE(SamYaple): At this time, there are no capabilites to negotiate, this is "future-proofing" for QMP
     // NOTE(SamYaple): Exit capability negotiation
     execute(&mut socket, "qmp_capabilities".to_string());
-    reader.read_line(&mut String::new());
+    match reader.read_line(&mut String::new()) {
+        Ok(x)  => if x == 0 { return; },
+        Err(x) => {
+            println!("Unknown Error: {}", x);
+            return;
+        },
+    }
 
     // NOTE(SamYaple): Worker thread recieves commands from channel and writes them to the socket
     thread::spawn(move || {
@@ -125,6 +136,9 @@ fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc
                 return;
             },
         }
+        // TODO(SamYaple): Seperate these into events and replies
+        reply_tx.send(line.trim().to_string()).unwrap();
+        event_tx.send(line.trim().to_string()).unwrap();
         println!("{}", line.trim());
     }
 }
