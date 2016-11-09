@@ -8,88 +8,28 @@
 // TODO(SamYaple): Error handling for QMP responses (QMP/QEMU issues, not operating system related)
 // TODO(SamYaple): Write tests
 
+extern crate serde_json;
+
 use std::io::prelude::*;
 
-use std::fmt;
 use std::io::BufReader;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc;
 use std::thread;
-use std::time;
 
-// TODO(SamYaple): Write specialized deserializer to prevent the need of having more than one struct per QMP response
-#[derive(Deserialize, Debug)]
-struct QemuInfo {
-    #[serde(rename="QMP")]
-    qmp: Info,
-}
-
-#[derive(Deserialize, Debug)]
-struct Info {
-    version: Version,
-    capabilities: Vec<String>,
-}
-
-#[derive(Deserialize, Debug)]
-struct Version {
-    qemu: Qemu,
-    package: String,
-}
-
-#[derive(Deserialize, Debug)]
-struct Qemu {
-    major: u8,
-    micro: u8,
-    minor: u8,
-}
-
-impl fmt::Display for Qemu {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}.{}.{}", self.major, self.minor, self.micro)
-    }
-}
-
-#[derive(Serialize)]
-struct Execute {
-    #[serde(rename="execute")]
-    command: String,
-}
-
-fn main() {
-    let socket_path = "/tmp/vm.sock";
-    let (command_tx, command_rx) = mpsc::channel();
-    let (reply_tx, reply_rx) = mpsc::channel();
-    let (event_tx, event_rx) = mpsc::channel();
-
-    // NOTE(SamYaple): Thread responsible for interacting with socket
-    let monitor = thread::spawn(move || {
-        monitor(socket_path, command_rx, reply_tx, event_tx)
-    });
-
-    // NOTE(SamYaple): temporary thread that exists to clear the event channel
-    thread::spawn(move || {loop {event_rx.recv().unwrap();}});
-
-    // NOTE(SamYaple): Thread responsible for periodic health checks
-    thread::spawn(move || {
-        loop {
-            command_tx.send("query-status".to_string()).unwrap();
-            let response = reply_rx.recv().unwrap();
-            println!("{}", response);
-            thread::sleep(time::Duration::from_millis(10000));
-        }
-    });
-
-    // NOTE(SamYaple): Hang until monitor thread ends
-    // TODO(SamYaple): Properly monitor thread and possible restart threads if they die
-    let _ = monitor.join();
-}
+pub use self::response::QemuInfo;
+pub use self::response::Info;
+pub use self::response::Version;
+pub use self::response::Qemu;
+pub use self::response::Execute;
+mod response;
 
 fn execute(writer: &mut UnixStream, command: String) {
     let command = serde_json::to_string(&Execute{ command: command }).unwrap();
     writer.write_all(command.as_bytes()).unwrap();
 }
 
-fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc::Sender<String>, event_tx: mpsc::Sender<String>) {
+pub fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc::Sender<String>, event_tx: mpsc::Sender<String>) {
     // TODO(SamYaple): Error checking
     // TODO(SamYaple): socket timeout
     let mut socket = UnixStream::connect(socket_path).unwrap();
