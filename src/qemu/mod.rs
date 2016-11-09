@@ -30,8 +30,8 @@ fn execute(writer: &mut UnixStream, command: String) {
 
 pub fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc::Sender<String>, event_tx: mpsc::Sender<String>) {
     // TODO(SamYaple): Error checking
-    let mut socket = UnixStream::connect(socket_path).unwrap();
-    let read_socket = socket.try_clone().unwrap();
+    let mut writer = UnixStream::connect(socket_path).unwrap();
+    let read_socket = writer.try_clone().unwrap();
     let mut reader = BufReader::new(read_socket);
 
     // NOTE(SamYaple): Read initial string from socket containing version and capability info
@@ -46,7 +46,7 @@ pub fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: 
 
     // NOTE(SamYaple): At this time, there are no capabilites to negotiate, this is "future-proofing" for QMP
     // NOTE(SamYaple): Exit capability negotiation
-    execute(&mut socket, "qmp_capabilities".to_string());
+    execute(&mut writer, "qmp_capabilities".to_string());
     match reader.read_line(&mut String::new()) {
         Ok(x)  => if x == 0 { return; },
         Err(x) => {
@@ -60,7 +60,7 @@ pub fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: 
         loop {
             // NOTE(SamYaple): This is a blocking operation
             let command = command_rx.recv().unwrap();
-            execute(&mut socket, command);
+            execute(&mut writer, command);
         }
     });
 
