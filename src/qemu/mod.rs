@@ -30,7 +30,10 @@ fn execute(writer: &mut UnixStream, command: String) {
 
 pub fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: mpsc::Sender<String>, event_tx: mpsc::Sender<String>) {
     // TODO(SamYaple): Error checking
-    let mut writer = UnixStream::connect(socket_path).unwrap();
+    let mut writer = match UnixStream::connect(socket_path) {
+        Ok(x) => { x },
+        Err(x) => { println!("writer error: {}", x); return; },
+    };
     let read_socket = writer.try_clone().unwrap();
     let mut reader = BufReader::new(read_socket);
 
@@ -40,7 +43,12 @@ pub fn monitor(socket_path: &str, command_rx: mpsc::Receiver<String>, reply_tx: 
         Ok(_)  => { },
         Err(x) => { println!("unexpected error: {}", x); return; },
     }
-    let info: QemuInfo = serde_json::from_str(&version_raw).unwrap();
+    let info: QemuInfo = match serde_json::from_str(&version_raw) {
+        Ok(x) => { x },
+        Err(x) => {
+            panic!("Could not load QemuInfo: {}", x);
+        },
+    };
     let version = info.qmp.version;
     println!("Version: {}, Package:{}", version.qemu, version.package);
 
